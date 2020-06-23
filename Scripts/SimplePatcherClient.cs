@@ -278,7 +278,7 @@ namespace SimplePatcher
                                 await writeFileStream.WriteAsync(buff, 0, count);
                                 writeFileStream.Flush();
                                 Debug.Log("Unzipping Entry: " + totalCount + "/" + zipInputStream.Length);
-                                onDownloadingProgress.Invoke(totalCount, zipInputStream.Length);
+                                onUnzippingFileProgress.Invoke(totalCount, zipInputStream.Length);
                                 if (destroyed)
                                     break;
                             }

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
@@ -23,7 +24,7 @@ namespace SimplePatcher
             public string fileurl;
             public string filemd5;
         }
-        
+
         public enum State
         {
             None,
@@ -44,10 +45,10 @@ namespace SimplePatcher
 
         public void StartUpdate()
         {
-            StartCoroutine(StartUpdateRoutine());
+            StartUpdateRoutine();
         }
 
-        IEnumerator StartUpdateRoutine()
+        async void StartUpdateRoutine()
         {
             CurrentState = State.ValidatingMD5;
             string md5 = string.Empty;
@@ -56,113 +57,139 @@ namespace SimplePatcher
             {
                 using (StreamReader reader = new StreamReader(unzippedMD5File))
                 {
-                    md5 = reader.ReadToEnd();
+                    md5 = await reader.ReadToEndAsync();
                     reader.Close();
                 }
             }
             string validateUrl = serviceUrl + "?md5=" + md5;
             Debug.Log("Validating MD5: " + md5 + " URL: " + validateUrl);
-            UnityWebRequest request = UnityWebRequest.Get(validateUrl);
-            yield return request.SendWebRequest();
-            if (request.isHttpError || request.isNetworkError)
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(validateUrl);
+            using (HttpWebResponse response = (HttpWebResponse)await request.GetResponseAsync())
+            using (Stream stream = response.GetResponseStream())
+            using (StreamReader reader = new StreamReader(stream))
             {
-                Debug.LogError("Error occurs when validate MD5: " + request.error);
-                onCompareMD5Error.Invoke(request.error);
-            }
-            else
-            {
-                Debug.Log("Validate MD5 Result: " + request.downloadHandler.text);
-                ValidateResult result = JsonUtility.FromJson<ValidateResult>(request.downloadHandler.text);
-                if (!result.updated)
+                switch (response.StatusCode)
                 {
-                    CurrentState = State.Downloading;
-                    yield return StartCoroutine(DownloadFileRoutine(result.fileurl, result.filemd5));
-                    CurrentState = State.Unzipping;
-                    yield return StartCoroutine(UnzipRoutine());
+                    case HttpStatusCode.OK:
+                        string content = await reader.ReadToEndAsync();
+                        Debug.Log("Validate MD5 Result: " + content);
+                        ValidateResult result = JsonUtility.FromJson<ValidateResult>(content);
+                        if (!result.updated)
+                        {
+                            CurrentState = State.Downloading;
+                            await DownloadFileRoutine(result.fileurl, result.filemd5);
+                            CurrentState = State.Unzipping;
+                            await UnzipRoutine();
+                        }
+                        CurrentState = State.ReadyToPlay;
+                        break;
+                    default:
+                        string description = response.StatusDescription;
+                        Debug.LogError("Error occurs when validate MD5: " + description);
+                        onCompareMD5Error.Invoke(description);
+                        break;
                 }
-                CurrentState = State.ReadyToPlay;
             }
         }
 
-        IEnumerator DownloadFileRoutine(string url, string serviceMD5)
+        async Task DownloadFileRoutine(string url, string serviceMD5)
         {
             string cachingMD5 = string.Empty;
-            string cachingMD5File = GetCachingMD5FilePath();
-            if (File.Exists(cachingMD5File))
+            string cachingMD5FilePath = GetCachingMD5FilePath();
+            if (File.Exists(cachingMD5FilePath))
             {
-                using (StreamReader reader = new StreamReader(cachingMD5File))
+                using (StreamReader reader = new StreamReader(cachingMD5FilePath))
                 {
-                    cachingMD5 = reader.ReadToEnd();
+                    cachingMD5 = await reader.ReadToEndAsync();
                     reader.Close();
                 }
             }
             string cachingFilePath = GetCachingFilePath();
-            bool cachingFileExists = File.Exists(cachingFilePath);
-            if (cachingFileExists && !serviceMD5.Equals(cachingMD5))
+            if (File.Exists(cachingFilePath) && !serviceMD5.Equals(cachingMD5))
             {
                 // Clear old partial downloading file
                 Debug.Log("Caching file with different MD5 exists, delete it");
                 File.Delete(cachingFilePath);
-                cachingFileExists = false;
             }
+            cachingMD5 = serviceMD5;
+            WriteMD5(cachingMD5FilePath, cachingMD5);
             long cachingFileSize;
             long downloadingFileSize;
             do
             {
-                cachingFileSize = cachingFileExists ? new FileInfo(cachingFilePath).Length : 0;
+                cachingFileSize = File.Exists(cachingFilePath) ? new FileInfo(cachingFilePath).Length : 0;
                 // Get downloading file size
                 HttpWebRequest headRequest = (HttpWebRequest)WebRequest.Create(url);
                 headRequest.Method = WebRequestMethods.Http.Head;
                 HttpWebResponse headResponse;
                 try
                 {
-                    headResponse = (HttpWebResponse)headRequest.GetResponse();
+                    headResponse = (HttpWebResponse)await headRequest.GetResponseAsync();
                     headRequest.Abort();
                 }
                 catch
                 {
                     // Cannot find the file from service
                     onDownloadingFileNotExisted.Invoke();
-                    yield break;
+                    return;
                 }
                 downloadingFileSize = headResponse.ContentLength;
-                yield return null;
                 onDownloadingProgress.Invoke(cachingFileSize, downloadingFileSize);
                 Debug.Log("Downloading " + cachingFileSize + "/" + downloadingFileSize);
                 if (cachingFileSize != downloadingFileSize)
-                    DownloadFile(cachingFilePath, url, cachingFileSize, downloadingFileSize);
+                    await DownloadFile(cachingFilePath, url, cachingFileSize, downloadingFileSize);
             } while (cachingFileSize != downloadingFileSize);
         }
 
-        void DownloadFile(string cachingFilePath, string downloadingFileUrl, long cachingFileSize, long downloadingFileSize)
+        async Task DownloadFile(string cachingFilePath, string downloadingFileUrl, long cachingFileSize, long downloadingFileSize)
         {
             int bufferSize = 1024 * 1000;
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(downloadingFileUrl);
-            request.Timeout = 30000;
-            request.AddRange((int)cachingFileSize, (int)downloadingFileSize - 1);
+            request.Timeout = 1000;
+            request.AddRange(cachingFileSize, downloadingFileSize - 1);
             request.Method = WebRequestMethods.Http.Get;
-            WebResponse response = request.GetResponse();
-            Stream inStream = response.GetResponseStream();
-            FileStream outStream = new FileStream(cachingFilePath, (cachingFileSize > 0) ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
-
-            int count;
-            byte[] buff = new byte[bufferSize];
-            while ((count = inStream.Read(buff, 0, bufferSize)) > 0)
+            using (WebResponse response = await request.GetResponseAsync())
+            using (Stream responseStream = response.GetResponseStream())
+            using (FileStream writeFileStream = new FileStream(cachingFilePath, (cachingFileSize > 0) ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
             {
-                outStream.Write(buff, 0, count);
-                outStream.Flush();
-            }
+                int count;
+                byte[] buff = new byte[bufferSize];
+                while ((count = responseStream.Read(buff, 0, bufferSize)) > 0)
+                {
+                    await writeFileStream.WriteAsync(buff, 0, count);
+                    writeFileStream.Flush();
+                }
 
-            outStream.Flush();
-            outStream.Close();
-            inStream.Close();
+                writeFileStream.Flush();
+                writeFileStream.Close();
+                responseStream.Close();
+            }
             request.Abort();
         }
 
-        IEnumerator UnzipRoutine()
+        async Task UnzipRoutine()
         {
+            string unzippedMD5;
+            using (MD5 md5 = MD5.Create())
+            {
+                using (FileStream stream = File.OpenRead(GetCachingFilePath()))
+                {
+                    byte[] hash = md5.ComputeHash(stream);
+                    unzippedMD5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            WriteMD5(GetUnzippedMD5FilePath(), unzippedMD5);
             // TODO: Implement this
-            yield return null;
+            await Task.Yield();
+        }
+
+        void WriteMD5(string path, string md5)
+        {
+            using (StreamWriter writer = new StreamWriter(path))
+            {
+                writer.Write(md5);
+                writer.Close();
+            }
         }
 
         string GetUnzippedMD5FilePath()

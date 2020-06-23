@@ -7,8 +7,6 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
-using ICSharpCode;
-using ICSharpCode.SharpZipLib;
 using ICSharpCode.SharpZipLib.Zip;
 
 namespace SimplePatcher
@@ -45,6 +43,8 @@ namespace SimplePatcher
         public ProgressEvent onDownloadingProgress;
         public UnityEvent onDownloadingFileNotExisted;
         public ProgressEvent onUnzippingProgress;
+        public StringEvent onUnzippingFileName;
+        public ProgressEvent onUnzippingFileProgress;
 
         public State CurrentState { get; private set; }
         private bool destroyed;
@@ -57,6 +57,12 @@ namespace SimplePatcher
         public void StartUpdate()
         {
             StartUpdateRoutine();
+        }
+
+        public void PlayGame()
+        {
+            if (CurrentState != State.ReadyToPlay)
+                return;
         }
 
         async void StartUpdateRoutine()
@@ -155,7 +161,7 @@ namespace SimplePatcher
                 return;
             }
             downloadingFileSize = headResponse.ContentLength;
-            if (cachingFileSize != downloadingFileSize && !destroyed)
+            if (cachingFileSize != downloadingFileSize)
                 await DownloadFile(cachingFilePath, url, cachingFileSize, downloadingFileSize);
             Debug.Log("Downloaded");
         }
@@ -178,8 +184,10 @@ namespace SimplePatcher
                     await writeFileStream.WriteAsync(buff, 0, count);
                     writeFileStream.Flush();
                     cachingFileSize += count;
-                    Debug.Log("Downloading " + cachingFileSize + "/" + downloadingFileSize);
+                    Debug.Log("Downloading: " + cachingFileSize + "/" + downloadingFileSize);
                     onDownloadingProgress.Invoke(cachingFileSize, downloadingFileSize);
+                    if (destroyed)
+                        break;
                 }
 
                 writeFileStream.Flush();
@@ -232,10 +240,13 @@ namespace SimplePatcher
                 ZipEntry zipEntry = null;
                 while ((zipEntry = zipInputStream.GetNextEntry()) != null)
                 {
-                    string zipEntryName = zipEntry.Name;
+                    Debug.Log("Unzipping: " + zipStream.Position + "/" + zipStream.Length);
+                    onUnzippingProgress.Invoke(zipStream.Position, zipStream.Length);
+                    Debug.Log("Unzipping Entry: " + zipEntry.Name);
+                    onUnzippingFileName.Invoke(zipEntry.Name);
                     if (!zipEntry.IsFile)
                     {
-                        string directoryName = Path.Combine(extractDirectory, Path.GetDirectoryName(zipEntryName));
+                        string directoryName = Path.Combine(extractDirectory, Path.GetDirectoryName(zipEntry.Name));
                         // Create directory
                         if (directoryName.Length > 0 && !Directory.Exists(directoryName))
                         {
@@ -244,7 +255,8 @@ namespace SimplePatcher
                     }
                     else
                     {
-                        string extractPath = Path.Combine(extractDirectory, zipEntryName);
+                        string extractPath = Path.Combine(extractDirectory, zipEntry.Name);
+                        int totalCount = 0;
                         int count;
                         int bufferSize = 1024 * 1000;
                         byte[] buff = new byte[bufferSize];
@@ -252,14 +264,20 @@ namespace SimplePatcher
                         {
                             while ((count = await zipInputStream.ReadAsync(buff, 0, bufferSize)) > 0)
                             {
+                                totalCount += count;
                                 await writeFileStream.WriteAsync(buff, 0, count);
                                 writeFileStream.Flush();
+                                Debug.Log("Unzipping Entry: " + totalCount + "/" + zipInputStream.Length);
+                                onDownloadingProgress.Invoke(totalCount, zipInputStream.Length);
+                                if (destroyed)
+                                    break;
                             }
                             writeFileStream.Flush();
                             writeFileStream.Close();
                         }
                     }
-                    onUnzippingProgress.Invoke(zipInputStream.Position, zipInputStream.Length);
+                    if (destroyed)
+                        break;
                 }
                 zipInputStream.Close();
             }

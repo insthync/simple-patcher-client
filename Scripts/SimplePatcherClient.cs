@@ -13,18 +13,6 @@ namespace SimplePatcher
 {
     public class SimplePatcherClient : MonoBehaviour
     {
-        [Serializable]
-        public class StringEvent : UnityEvent<string> { }
-        [Serializable]
-        public class ProgressEvent : UnityEvent<long, long> { }
-        [Serializable]
-        public struct ValidateResult
-        {
-            public bool updated;
-            public string fileurl;
-            public string filemd5;
-        }
-
         public enum State
         {
             None,
@@ -33,18 +21,35 @@ namespace SimplePatcher
             Unzipping,
             ReadyToPlay
         }
+        [Serializable]
+        public class StringEvent : UnityEvent<string> { }
+        [Serializable]
+        public class ProgressEvent : UnityEvent<long, long> { }
+        [Serializable]
+        public class StateEvent : UnityEvent<State> { }
+        [Serializable]
+        public struct ValidateResult
+        {
+            public bool updated;
+            public string fileurl;
+            public string filemd5;
+            public string notice;
+        }
+
         public string cachingMD5File = "downloading_md5.txt";
         public string unzippedMD5File = "unzipped_md5.txt";
         public string cachingZipFile = "local.zip";
         public string extractDirectory = "Exe";
         public string cacheDirectory = "Cache";
         public string serviceUrl = "ENTER YOUR SERVICE URL HERE";
+        public StringEvent onReceiveNotice;
         public StringEvent onCompareMD5Error;
         public ProgressEvent onDownloadingProgress;
         public UnityEvent onDownloadingFileNotExisted;
         public ProgressEvent onUnzippingProgress;
         public StringEvent onUnzippingFileName;
         public ProgressEvent onUnzippingFileProgress;
+        public StateEvent onStateChange;
 
         public State CurrentState { get; private set; }
         private bool destroyed;
@@ -76,6 +81,7 @@ namespace SimplePatcher
                 Directory.CreateDirectory(unzipDirectoryPath);
 
             CurrentState = State.ValidatingMD5;
+            onStateChange.Invoke(CurrentState);
             string md5 = string.Empty;
             string unzippedMD5File = GetUnzippedMD5FilePath();
             if (File.Exists(unzippedMD5File))
@@ -99,14 +105,18 @@ namespace SimplePatcher
                         string content = await reader.ReadToEndAsync();
                         Debug.Log("Validate MD5 Result: " + content);
                         ValidateResult result = JsonUtility.FromJson<ValidateResult>(content);
+                        onReceiveNotice.Invoke(result.notice);
                         if (!result.updated)
                         {
                             CurrentState = State.Downloading;
+                            onStateChange.Invoke(CurrentState);
                             await DownloadFileRoutine(result.fileurl, result.filemd5);
                             CurrentState = State.Unzipping;
+                            onStateChange.Invoke(CurrentState);
                             await UnzipRoutine();
                         }
                         CurrentState = State.ReadyToPlay;
+                        onStateChange.Invoke(CurrentState);
                         break;
                     default:
                         string description = response.StatusDescription;
@@ -200,23 +210,23 @@ namespace SimplePatcher
 
         async Task UnzipRoutine()
         {
+            string cachingFilePath = GetCachingFilePath();
+            using (FileStream stream = File.OpenRead(cachingFilePath))
+            {
+                await UnZip(stream, GetUnzipDirectoryPath());
+            }
             string unzippedMD5;
             using (MD5 md5 = MD5.Create())
+            using (FileStream stream = File.OpenRead(cachingFilePath))
             {
-                using (FileStream stream = File.OpenRead(GetCachingFilePath()))
-                {
-                    await UnZip(stream, GetUnzipDirectoryPath());
-                }
-                using (FileStream stream = File.OpenRead(GetCachingFilePath()))
-                {
-                    byte[] hash = md5.ComputeHash(stream);
-                    unzippedMD5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-                    stream.Close();
-                }
+                byte[] hash = md5.ComputeHash(stream);
+                unzippedMD5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                stream.Close();
             }
             Debug.Log("UnZipped");
             WriteMD5(GetUnzippedMD5FilePath(), unzippedMD5);
             Debug.Log("Written MD5: " + unzippedMD5);
+            File.Delete(cachingFilePath);
         }
 
         void WriteMD5(string path, string md5)

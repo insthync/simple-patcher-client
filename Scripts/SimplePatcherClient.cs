@@ -12,7 +12,9 @@ namespace SimplePatcher
 {
     public class SimplePatcherClient : MonoBehaviour
     {
+        [Serializable]
         public class StringEvent : UnityEvent<string> { }
+        [Serializable]
         public class ProgressEvent : UnityEvent<long, long> { }
         [Serializable]
         public struct ValidateResult
@@ -58,14 +60,18 @@ namespace SimplePatcher
                     reader.Close();
                 }
             }
-            UnityWebRequest request = new UnityWebRequest(serviceUrl + "?md5=" + md5);
+            string validateUrl = serviceUrl + "?md5=" + md5;
+            Debug.Log("Validating MD5: " + md5 + " URL: " + validateUrl);
+            UnityWebRequest request = new UnityWebRequest(validateUrl);
             yield return request.SendWebRequest();
             if (request.isHttpError || request.isNetworkError)
             {
+                Debug.LogError("Error occurs when validate MD5: " + request.error);
                 onCompareMD5Error.Invoke(request.error);
             }
             else
             {
+                Debug.Log("Validate MD5 Result: " + request.downloadHandler.text);
                 ValidateResult result = JsonUtility.FromJson<ValidateResult>(request.downloadHandler.text);
                 if (!result.updated)
                 {
@@ -74,8 +80,8 @@ namespace SimplePatcher
                     CurrentState = State.Unzipping;
                     yield return StartCoroutine(UnzipRoutine());
                 }
+                CurrentState = State.ReadyToPlay;
             }
-            CurrentState = State.ReadyToPlay;
         }
 
         IEnumerator DownloadFileRoutine(string url, string serviceMD5)
@@ -95,6 +101,7 @@ namespace SimplePatcher
             if (cachingFileExists && !serviceMD5.Equals(cachingMD5))
             {
                 // Clear old partial downloading file
+                Debug.Log("Caching file with different MD5 exists, delete it");
                 File.Delete(cachingFilePath);
                 cachingFileExists = false;
             }
@@ -121,6 +128,7 @@ namespace SimplePatcher
                 downloadingFileSize = headResponse.ContentLength;
                 yield return null;
                 onDownloadingProgress.Invoke(cachingFileSize, downloadingFileSize);
+                Debug.Log("Downloading " + cachingFileSize + "/" + downloadingFileSize);
                 if (cachingFileSize != downloadingFileSize)
                     DownloadFile(cachingFilePath, url, cachingFileSize, downloadingFileSize);
             } while (cachingFileSize != downloadingFileSize);

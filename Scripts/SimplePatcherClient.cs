@@ -7,7 +7,9 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
-using UnityEngine.Networking;
+using ICSharpCode;
+using ICSharpCode.SharpZipLib;
+using ICSharpCode.SharpZipLib.Zip;
 
 namespace SimplePatcher
 {
@@ -37,12 +39,11 @@ namespace SimplePatcher
         public string unzippedMD5File = "unzipped_md5.txt";
         public string cachingZipFile = "local.zip";
         public string directoryPath = "Exe";
-        public string pcExeFileName = "";
-        public string macExeFileName = "";
         public string serviceUrl = "ENTER YOUR SERVICE URL HERE";
         public StringEvent onCompareMD5Error;
         public ProgressEvent onDownloadingProgress;
         public UnityEvent onDownloadingFileNotExisted;
+        public ProgressEvent onUnzippingProgress;
 
         public State CurrentState { get; private set; }
         private bool destroyed;
@@ -187,16 +188,21 @@ namespace SimplePatcher
             {
                 using (FileStream stream = File.OpenRead(GetCachingFilePath()))
                 {
+                    string unzipDirectoryPath = GetUnzipDirectoryPath();
+                    if (!Directory.Exists(unzipDirectoryPath))
+                        Directory.CreateDirectory(unzipDirectoryPath);
+                    await UnZip(stream, unzipDirectoryPath);
+                }
+                using (FileStream stream = File.OpenRead(GetCachingFilePath()))
+                {
                     byte[] hash = md5.ComputeHash(stream);
                     unzippedMD5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                    stream.Close();
                 }
             }
-            string unzipDirectoryPath = GetUnzipDirectoryPath();
-            if (!Directory.Exists(unzipDirectoryPath))
-                Directory.CreateDirectory(unzipDirectoryPath);
+            Debug.Log("UnZipped");
             WriteMD5(GetUnzippedMD5FilePath(), unzippedMD5);
-            // TODO: Implement this
-            await Task.Yield();
+            Debug.Log("Written MD5: " + unzippedMD5);
         }
 
         void WriteMD5(string path, string md5)
@@ -205,6 +211,51 @@ namespace SimplePatcher
             {
                 writer.Write(md5);
                 writer.Close();
+            }
+        }
+
+        async Task UnZip(Stream zipStream, string extractDirectory, string password = "")
+        {
+            using (ZipInputStream zipInputStream = new ZipInputStream(zipStream))
+            {
+                // Set a zip password if it's required
+                if (password.Length > 0)
+                {
+                    zipInputStream.Password = password;
+                }
+                ZipEntry zipEntry = null;
+                while ((zipEntry = zipInputStream.GetNextEntry()) != null)
+                {
+                    string zipEntryName = zipEntry.Name;
+                    if (!zipEntry.IsFile)
+                    {
+                        string directoryName = Path.Combine(extractDirectory, Path.GetDirectoryName(zipEntryName));
+                        // Create directory
+                        if (directoryName.Length > 0 && !Directory.Exists(directoryName))
+                        {
+                            Directory.CreateDirectory(directoryName);
+                        }
+                    }
+                    else
+                    {
+                        string extractPath = Path.Combine(extractDirectory, zipEntryName);
+                        int count;
+                        int bufferSize = 1024 * 1000;
+                        byte[] buff = new byte[bufferSize];
+                        using (FileStream writeFileStream = File.Create(extractPath))
+                        {
+                            while ((count = await zipInputStream.ReadAsync(buff, 0, bufferSize)) > 0)
+                            {
+                                await writeFileStream.WriteAsync(buff, 0, count);
+                                writeFileStream.Flush();
+                            }
+                            writeFileStream.Flush();
+                            writeFileStream.Close();
+                        }
+                    }
+                    onUnzippingProgress.Invoke(zipInputStream.Position, zipInputStream.Length);
+                }
+                zipInputStream.Close();
             }
         }
 

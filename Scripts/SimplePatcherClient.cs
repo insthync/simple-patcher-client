@@ -36,8 +36,10 @@ namespace SimplePatcher
         public string cachingMD5File = "downloading_md5.txt";
         public string unzippedMD5File = "unzipped_md5.txt";
         public string cachingZipFile = "local.zip";
+        public string directoryPath = "Exe";
+        public string pcExeFileName = "";
+        public string macExeFileName = "";
         public string serviceUrl = "ENTER YOUR SERVICE URL HERE";
-        public int downloadChunkSize = 409600;
         public StringEvent onCompareMD5Error;
         public ProgressEvent onDownloadingProgress;
         public UnityEvent onDownloadingFileNotExisted;
@@ -96,7 +98,11 @@ namespace SimplePatcher
                         onCompareMD5Error.Invoke(description);
                         break;
                 }
+                reader.Close();
+                stream.Close();
+                response.Close();
             }
+            request.Abort();
         }
 
         async Task DownloadFileRoutine(string url, string serviceMD5)
@@ -122,42 +128,34 @@ namespace SimplePatcher
             WriteMD5(cachingMD5FilePath, cachingMD5);
             long cachingFileSize;
             long downloadingFileSize;
-            do
+            cachingFileSize = File.Exists(cachingFilePath) ? new FileInfo(cachingFilePath).Length : 0;
+            // Get downloading file size
+            HttpWebRequest headRequest = (HttpWebRequest)WebRequest.Create(url);
+            headRequest.Method = WebRequestMethods.Http.Head;
+            HttpWebResponse headResponse;
+            try
             {
-                cachingFileSize = File.Exists(cachingFilePath) ? new FileInfo(cachingFilePath).Length : 0;
-                // Get downloading file size
-                HttpWebRequest headRequest = (HttpWebRequest)WebRequest.Create(url);
-                headRequest.Method = WebRequestMethods.Http.Head;
-                HttpWebResponse headResponse;
-                try
-                {
-                    headResponse = (HttpWebResponse)await headRequest.GetResponseAsync();
-                    headRequest.Abort();
-                }
-                catch
-                {
-                    // Cannot find the file from service
-                    onDownloadingFileNotExisted.Invoke();
-                    return;
-                }
-                downloadingFileSize = headResponse.ContentLength;
-                onDownloadingProgress.Invoke(cachingFileSize, downloadingFileSize);
-                Debug.Log("Downloading " + cachingFileSize + "/" + downloadingFileSize);
-                if (cachingFileSize != downloadingFileSize && !destroyed)
-                    await DownloadFile(cachingFilePath, url, cachingFileSize, downloadingFileSize);
-            } while (cachingFileSize != downloadingFileSize && !destroyed);
+                headResponse = (HttpWebResponse)await headRequest.GetResponseAsync();
+                headRequest.Abort();
+            }
+            catch
+            {
+                // Cannot find the file from service
+                onDownloadingFileNotExisted.Invoke();
+                return;
+            }
+            downloadingFileSize = headResponse.ContentLength;
+            if (cachingFileSize != downloadingFileSize && !destroyed)
+                await DownloadFile(cachingFilePath, url, cachingFileSize, downloadingFileSize);
             Debug.Log("Downloaded");
         }
 
         async Task DownloadFile(string cachingFilePath, string downloadingFileUrl, long cachingFileSize, long downloadingFileSize)
         {
             int bufferSize = 1024 * 1000;
-            long downloadTo = cachingFileSize + downloadChunkSize;
-            if (downloadTo > downloadingFileSize - 1)
-                downloadTo = downloadingFileSize - 1;
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(downloadingFileUrl);
             request.Timeout = 30000;
-            request.AddRange(cachingFileSize, downloadTo);
+            request.AddRange(cachingFileSize, downloadingFileSize - 1);
             request.Method = WebRequestMethods.Http.Get;
             using (WebResponse response = await request.GetResponseAsync())
             using (Stream responseStream = response.GetResponseStream())
@@ -165,15 +163,19 @@ namespace SimplePatcher
             {
                 int count;
                 byte[] buff = new byte[bufferSize];
-                while ((count = responseStream.Read(buff, 0, bufferSize)) > 0)
+                while ((count = await responseStream.ReadAsync(buff, 0, bufferSize)) > 0)
                 {
                     await writeFileStream.WriteAsync(buff, 0, count);
                     writeFileStream.Flush();
+                    cachingFileSize += count;
+                    Debug.Log("Downloading " + cachingFileSize + "/" + downloadingFileSize);
+                    onDownloadingProgress.Invoke(cachingFileSize, downloadingFileSize);
                 }
 
                 writeFileStream.Flush();
                 writeFileStream.Close();
                 responseStream.Close();
+                response.Close();
             }
             request.Abort();
         }
@@ -189,6 +191,9 @@ namespace SimplePatcher
                     unzippedMD5 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
                 }
             }
+            string unzipDirectoryPath = GetUnzipDirectoryPath();
+            if (!Directory.Exists(unzipDirectoryPath))
+                Directory.CreateDirectory(unzipDirectoryPath);
             WriteMD5(GetUnzippedMD5FilePath(), unzippedMD5);
             // TODO: Implement this
             await Task.Yield();
@@ -205,17 +210,22 @@ namespace SimplePatcher
 
         string GetUnzippedMD5FilePath()
         {
-            return Path.Combine(Application.dataPath, Path.GetFileName(unzippedMD5File));
+            return Path.Combine(Path.GetFullPath("."), Path.GetFileName(unzippedMD5File));
         }
 
         string GetCachingMD5FilePath()
         {
-            return Path.Combine(Application.dataPath, Path.GetFileName(cachingMD5File));
+            return Path.Combine(Path.GetFullPath("."), Path.GetFileName(cachingMD5File));
         }
 
         string GetCachingFilePath()
         {
-            return Path.Combine(Application.dataPath, Path.GetFileName(cachingZipFile));
+            return Path.Combine(Path.GetFullPath("."), Path.GetFileName(cachingZipFile));
+        }
+
+        string GetUnzipDirectoryPath()
+        {
+            return Path.Combine(Path.GetFullPath("."), directoryPath);
         }
     }
 }

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
 using ICSharpCode.SharpZipLib.Zip;
+using System.Linq;
 
 namespace SimplePatcher
 {
@@ -34,12 +35,14 @@ namespace SimplePatcher
             public string fileurl;
             public string filemd5;
             public string notice;
+            public string windowsexe;
+            public string osxexe;
         }
 
         public string cachingMD5File = "downloading_md5.txt";
         public string unzippedMD5File = "unzipped_md5.txt";
         public string cachingZipFile = "local.zip";
-        public string extractDirectory = "Exe";
+        public string unzipDirectory = "Exe";
         public string cacheDirectory = "Cache";
         public string serviceUrl = "ENTER YOUR SERVICE URL HERE";
         public StringEvent onReceiveNotice;
@@ -52,6 +55,7 @@ namespace SimplePatcher
         public StateEvent onStateChange;
 
         public State CurrentState { get; private set; }
+        private ValidateResult result;
         private bool destroyed;
 
         private void OnDestroy()
@@ -68,6 +72,20 @@ namespace SimplePatcher
         {
             if (CurrentState != State.ReadyToPlay)
                 return;
+            string filePath = string.Empty;
+            switch (Application.platform)
+            {
+                case RuntimePlatform.WindowsPlayer:
+                    filePath = Directory.GetFiles(GetUnzipDirectoryPath(), result.windowsexe, SearchOption.AllDirectories).FirstOrDefault();
+                    break;
+                case RuntimePlatform.OSXPlayer:
+                    filePath = Directory.GetFiles(GetUnzipDirectoryPath(), result.osxexe, SearchOption.AllDirectories).FirstOrDefault();
+                    break;
+            }
+            if (!string.IsNullOrEmpty(filePath))
+            {
+                System.Diagnostics.Process.Start(filePath);
+            }
         }
 
         async void StartUpdateRoutine()
@@ -104,7 +122,7 @@ namespace SimplePatcher
                     case HttpStatusCode.OK:
                         string content = await reader.ReadToEndAsync();
                         Debug.Log("Validate MD5 Result: " + content);
-                        ValidateResult result = JsonUtility.FromJson<ValidateResult>(content);
+                        result = JsonUtility.FromJson<ValidateResult>(content);
                         onReceiveNotice.Invoke(result.notice);
                         if (!result.updated)
                         {
@@ -315,7 +333,7 @@ namespace SimplePatcher
 
         string GetUnzipDirectoryPath()
         {
-            return Path.Combine(Path.GetFullPath("."), extractDirectory);
+            return Path.Combine(Path.GetFullPath("."), unzipDirectory);
         }
     }
 }

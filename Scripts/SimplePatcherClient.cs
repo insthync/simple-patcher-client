@@ -126,6 +126,11 @@ namespace SimplePatcher
                         onReceiveNotice.Invoke(result.notice);
                         if (!result.updated)
                         {
+                            string[] files = Directory.GetFiles(unzipDirectoryPath);
+                            foreach (string file in files)
+                            {
+                                File.Delete(file);
+                            }
                             CurrentState = State.Downloading;
                             onStateChange.Invoke(CurrentState);
                             await DownloadFileRoutine(result.fileurl, result.filemd5);

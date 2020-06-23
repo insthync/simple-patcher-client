@@ -32,11 +32,10 @@ namespace SimplePatcher
         public struct ValidateResult
         {
             public bool updated;
-            public string fileurl;
-            public string filemd5;
+            public string fileUrl;
+            public string fileMd5;
             public string notice;
-            public string windowsexe;
-            public string osxexe;
+            public string exe;
         }
 
         public string cachingMD5File = "downloading_md5.txt";
@@ -72,16 +71,7 @@ namespace SimplePatcher
         {
             if (CurrentState != State.ReadyToPlay)
                 return;
-            string filePath = string.Empty;
-            switch (Application.platform)
-            {
-                case RuntimePlatform.WindowsPlayer:
-                    filePath = Directory.GetFiles(GetUnzipDirectoryPath(), result.windowsexe, SearchOption.AllDirectories).FirstOrDefault();
-                    break;
-                case RuntimePlatform.OSXPlayer:
-                    filePath = Directory.GetFiles(GetUnzipDirectoryPath(), result.osxexe, SearchOption.AllDirectories).FirstOrDefault();
-                    break;
-            }
+            string filePath = Directory.GetFiles(GetUnzipDirectoryPath(), result.exe, SearchOption.AllDirectories).FirstOrDefault();
             if (!string.IsNullOrEmpty(filePath))
             {
                 System.Diagnostics.Process.Start(filePath);
@@ -110,7 +100,14 @@ namespace SimplePatcher
                     reader.Close();
                 }
             }
-            string validateUrl = serviceUrl + "?md5=" + md5;
+            int os = 0;
+            switch (Application.platform)
+            {
+                case RuntimePlatform.OSXPlayer:
+                    os = 1;
+                    break;
+            }
+            string validateUrl = serviceUrl + "?md5=" + md5 + "&os=" + os;
             Debug.Log("Validating MD5: " + md5 + " URL: " + validateUrl);
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(validateUrl);
             using (HttpWebResponse response = (HttpWebResponse)await request.GetResponseAsync())
@@ -134,7 +131,7 @@ namespace SimplePatcher
 
                             CurrentState = State.Downloading;
                             onStateChange.Invoke(CurrentState);
-                            await DownloadFileRoutine(result.fileurl, result.filemd5);
+                            await DownloadFileRoutine(result.fileUrl, result.fileMd5);
                             CurrentState = State.Unzipping;
                             onStateChange.Invoke(CurrentState);
                             await UnzipRoutine();

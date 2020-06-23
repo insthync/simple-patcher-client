@@ -38,7 +38,8 @@ namespace SimplePatcher
         public string cachingMD5File = "downloading_md5.txt";
         public string unzippedMD5File = "unzipped_md5.txt";
         public string cachingZipFile = "local.zip";
-        public string directoryPath = "Exe";
+        public string extractDirectory = "Exe";
+        public string cacheDirectory = "Cache";
         public string serviceUrl = "ENTER YOUR SERVICE URL HERE";
         public StringEvent onCompareMD5Error;
         public ProgressEvent onDownloadingProgress;
@@ -60,6 +61,14 @@ namespace SimplePatcher
 
         async void StartUpdateRoutine()
         {
+            // Prepare directories
+            string cacheDirectoryPath = GetCacheDirectoryPath();
+            if (!Directory.Exists(cacheDirectoryPath))
+                Directory.CreateDirectory(cacheDirectoryPath);
+            string unzipDirectoryPath = GetUnzipDirectoryPath();
+            if (!Directory.Exists(unzipDirectoryPath))
+                Directory.CreateDirectory(unzipDirectoryPath);
+
             CurrentState = State.ValidatingMD5;
             string md5 = string.Empty;
             string unzippedMD5File = GetUnzippedMD5FilePath();
@@ -188,10 +197,7 @@ namespace SimplePatcher
             {
                 using (FileStream stream = File.OpenRead(GetCachingFilePath()))
                 {
-                    string unzipDirectoryPath = GetUnzipDirectoryPath();
-                    if (!Directory.Exists(unzipDirectoryPath))
-                        Directory.CreateDirectory(unzipDirectoryPath);
-                    await UnZip(stream, unzipDirectoryPath);
+                    await UnZip(stream, GetUnzipDirectoryPath());
                 }
                 using (FileStream stream = File.OpenRead(GetCachingFilePath()))
                 {
@@ -261,22 +267,27 @@ namespace SimplePatcher
 
         string GetUnzippedMD5FilePath()
         {
-            return Path.Combine(Path.GetFullPath("."), Path.GetFileName(unzippedMD5File));
+            return Path.Combine(GetCacheDirectoryPath(), Path.GetFileName(unzippedMD5File));
         }
 
         string GetCachingMD5FilePath()
         {
-            return Path.Combine(Path.GetFullPath("."), Path.GetFileName(cachingMD5File));
+            return Path.Combine(GetCacheDirectoryPath(), Path.GetFileName(cachingMD5File));
         }
 
         string GetCachingFilePath()
         {
-            return Path.Combine(Path.GetFullPath("."), Path.GetFileName(cachingZipFile));
+            return Path.Combine(GetCacheDirectoryPath(), Path.GetFileName(cachingZipFile));
+        }
+
+        string GetCacheDirectoryPath()
+        {
+            return Path.Combine(Path.GetFullPath("."), cacheDirectory);
         }
 
         string GetUnzipDirectoryPath()
         {
-            return Path.Combine(Path.GetFullPath("."), directoryPath);
+            return Path.Combine(Path.GetFullPath("."), extractDirectory);
         }
     }
 }

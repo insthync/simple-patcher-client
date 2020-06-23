@@ -37,11 +37,18 @@ namespace SimplePatcher
         public string unzippedMD5File = "unzipped_md5.txt";
         public string cachingZipFile = "local.zip";
         public string serviceUrl = "ENTER YOUR SERVICE URL HERE";
+        public int downloadChunkSize = 409600;
         public StringEvent onCompareMD5Error;
         public ProgressEvent onDownloadingProgress;
         public UnityEvent onDownloadingFileNotExisted;
 
         public State CurrentState { get; private set; }
+        private bool destroyed;
+
+        private void OnDestroy()
+        {
+            destroyed = true;
+        }
 
         public void StartUpdate()
         {
@@ -136,17 +143,21 @@ namespace SimplePatcher
                 downloadingFileSize = headResponse.ContentLength;
                 onDownloadingProgress.Invoke(cachingFileSize, downloadingFileSize);
                 Debug.Log("Downloading " + cachingFileSize + "/" + downloadingFileSize);
-                if (cachingFileSize != downloadingFileSize)
+                if (cachingFileSize != downloadingFileSize && !destroyed)
                     await DownloadFile(cachingFilePath, url, cachingFileSize, downloadingFileSize);
-            } while (cachingFileSize != downloadingFileSize);
+            } while (cachingFileSize != downloadingFileSize && !destroyed);
+            Debug.Log("Downloaded");
         }
 
         async Task DownloadFile(string cachingFilePath, string downloadingFileUrl, long cachingFileSize, long downloadingFileSize)
         {
             int bufferSize = 1024 * 1000;
+            long downloadTo = cachingFileSize + downloadChunkSize;
+            if (downloadTo > downloadingFileSize - 1)
+                downloadTo = downloadingFileSize - 1;
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(downloadingFileUrl);
-            request.Timeout = 1000;
-            request.AddRange(cachingFileSize, downloadingFileSize - 1);
+            request.Timeout = 30000;
+            request.AddRange(cachingFileSize, downloadTo);
             request.Method = WebRequestMethods.Http.Get;
             using (WebResponse response = await request.GetResponseAsync())
             using (Stream responseStream = response.GetResponseStream())

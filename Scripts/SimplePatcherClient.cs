@@ -62,7 +62,7 @@ namespace SimplePatcher
             }
             string validateUrl = serviceUrl + "?md5=" + md5;
             Debug.Log("Validating MD5: " + md5 + " URL: " + validateUrl);
-            UnityWebRequest request = new UnityWebRequest(validateUrl);
+            UnityWebRequest request = UnityWebRequest.Get(validateUrl);
             yield return request.SendWebRequest();
             if (request.isHttpError || request.isNetworkError)
             {

@@ -84,6 +84,23 @@ namespace SimplePatcher
         public void OnStateChagne(SimplePatcherClient.State state)
         {
             playButton.interactable = state == SimplePatcherClient.State.ReadyToPlay;
+            if (state == SimplePatcherClient.State.ReadyToPlay)
+            {
+                if (textDownloadProgress != null)
+                    textDownloadProgress.text = string.Empty;
+                if (imageDownloadProgress != null)
+                    imageDownloadProgress.fillAmount = 1f;
+                if (textUnzipProgress != null)
+                    textUnzipProgress.text = string.Empty;
+                if (imageUnzipProgress != null)
+                    imageUnzipProgress.fillAmount = 1f;
+                if (textUnzipEntryProgress != null)
+                    textUnzipEntryProgress.text = string.Empty;
+                if (imageUnzipEntryProgress != null)
+                    imageUnzipEntryProgress.fillAmount = 1f;
+                if (textUnzipEntryName != null)
+                    textUnzipEntryName.text = string.Empty;
+            }
         }
     }
 }
